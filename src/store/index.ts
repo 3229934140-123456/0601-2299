@@ -97,6 +97,7 @@ interface AppState {
   getRecordsByClass: (classId: string) => TestRecord[];
   getRecordsByStudent: (studentId: string) => TestRecord[];
   getStudentRecordForProject: (studentId: string, projectId: string) => TestRecord | undefined;
+  getStudentAllRecordsForProject: (studentId: string, projectId: string) => TestRecord[];
   locateStudentInEntry: (studentId: string) => boolean;
   recalcGrade: (recordId: string) => void;
 
@@ -172,7 +173,7 @@ export const useAppStore = create<AppState>()(
         if (!student) return undefined;
 
         const existing = state.records.find(
-          (r) => r.studentId === studentId && r.projectId === projectId
+          (r) => r.studentId === studentId && r.projectId === projectId && r.sessionId === state.currentSessionId
         );
         let points = 0;
         let grade: GradeLevel | null = null;
@@ -199,6 +200,8 @@ export const useAppStore = create<AppState>()(
             photos: photos.length ? [...existing.photos, ...photos] : existing.photos,
             remark: remark ?? existing.remark,
             updatedAt: now,
+            syncStatus: state.isOnline ? "synced" : "pending",
+            syncedAt: state.isOnline ? now : existing.syncedAt,
           };
           set({
             records: state.records.map((r) => (r.id === existing.id ? updated : r)),
@@ -244,12 +247,23 @@ export const useAppStore = create<AppState>()(
         }
       },
 
-      updateRecord: (recordId, data) =>
-        set((state) => ({
+      updateRecord: (recordId, data) => {
+        const state = get();
+        const now = new Date().toISOString();
+        set({
           records: state.records.map((r) =>
-            r.id === recordId ? { ...r, ...data, updatedAt: new Date().toISOString() } : r
+            r.id === recordId
+              ? {
+                  ...r,
+                  ...data,
+                  updatedAt: now,
+                  syncStatus: state.isOnline ? "synced" : "pending",
+                  syncedAt: state.isOnline ? now : r.syncedAt,
+                }
+              : r
           ),
-        })),
+        });
+      },
 
       batchReview: (recordIds) => {
         const state = get();
@@ -378,6 +392,11 @@ export const useAppStore = create<AppState>()(
 
       getStudentRecordForProject: (studentId, projectId) =>
         get().records.find(
+          (r) => r.studentId === studentId && r.projectId === projectId && r.sessionId === get().currentSessionId
+        ),
+
+      getStudentAllRecordsForProject: (studentId, projectId) =>
+        get().records.filter(
           (r) => r.studentId === studentId && r.projectId === projectId
         ),
 

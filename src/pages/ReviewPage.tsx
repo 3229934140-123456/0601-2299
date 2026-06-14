@@ -206,7 +206,7 @@ export default function ReviewPage() {
               className="btn-secondary"
               onClick={() => {
                 if (currentClass) {
-                  exportClassReport(currentClass, classStudents, projects, records);
+                  exportClassReport(currentClass, classStudents, projects, records, currentSessionId);
                 }
               }}
             >

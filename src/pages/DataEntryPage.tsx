@@ -52,6 +52,7 @@ export default function DataEntryPage() {
     setScanModalOpen,
     isOnline,
     records,
+    currentSessionId,
   } = useAppStore();
 
   const students = useMemo(() => getFilteredStudents(), [getFilteredStudents]);
@@ -95,6 +96,11 @@ export default function DataEntryPage() {
   useEffect(() => {
     inputRef.current?.focus();
   }, [clampedIndex, currentProjectId, showFinishModal]);
+
+  useEffect(() => {
+    setInputValue("");
+    setShowFinishModal(false);
+  }, [currentProjectId]);
 
   const computed = useMemo(() => {
     if (!currentStudent || !currentProject || !inputValue) return null;
@@ -198,12 +204,14 @@ export default function DataEntryPage() {
         <Zap size={64} className="text-slate-300" />
         <div className="mt-4 text-lg font-semibold text-slate-700">请先选择测试项目</div>
         <div className="mt-1 text-sm text-slate-500">前往「项目测试」页面选择要录入的项目</div>
-        <button
-          onClick={() => setCurrentProject(projects[0].id)}
-          className="mt-6 btn-primary"
-        >
-          快速选择：{projects[0].name}
-        </button>
+        {projects.length > 0 && (
+          <button
+            onClick={() => setCurrentProject(projects[0].id)}
+            className="mt-6 btn-primary"
+          >
+            快速选择：{projects[0].name}
+          </button>
+        )}
       </div>
     );
   }
@@ -225,6 +233,7 @@ export default function DataEntryPage() {
     const sessionRecords = records.filter(
       (r) =>
         r.projectId === currentProjectId &&
+        r.sessionId === currentSessionId &&
         applicableIds.has(r.studentId) &&
         r.score !== null
     );
@@ -234,7 +243,18 @@ export default function DataEntryPage() {
     ).length;
     const passRate = recordedCount > 0 ? Math.round((passedCount / recordedCount) * 100) : 0;
     return { recordedCount, passRate };
-  }, [records, currentProjectId, applicableStudents]);
+  }, [records, currentProjectId, currentSessionId, applicableStudents]);
+
+  const pendingCount = useMemo(() => {
+    const applicableIds = new Set(applicableStudents.map((s) => s.id));
+    return records.filter(
+      (r) =>
+        r.projectId === currentProjectId &&
+        r.sessionId === currentSessionId &&
+        applicableIds.has(r.studentId) &&
+        r.syncStatus === "pending"
+    ).length;
+  }, [records, currentProjectId, currentSessionId, applicableStudents]);
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -326,9 +346,19 @@ export default function DataEntryPage() {
                 >
                   <div className="relative">
                     <Avatar name={s.name} color={s.avatarColor} size="sm" />
-                    {done && (
-                      <div className="absolute -right-0.5 -bottom-0.5 w-4 h-4 rounded-full bg-success text-white flex items-center justify-center border-2 border-white">
-                        <CheckCircle2 size={10} />
+                    {done && rec && (
+                      <div
+                        className={cn(
+                          "absolute -right-0.5 -bottom-0.5 w-4 h-4 rounded-full text-white flex items-center justify-center border-2 border-white",
+                          rec.syncStatus === "pending" ? "bg-amber-500" : "bg-success"
+                        )}
+                        title={rec.syncStatus === "pending" ? "待同步" : "已同步"}
+                      >
+                        {rec.syncStatus === "pending" ? (
+                          <Clock size={10} />
+                        ) : (
+                          <CheckCircle2 size={10} />
+                        )}
                       </div>
                     )}
                   </div>
@@ -634,6 +664,12 @@ export default function DataEntryPage() {
                 达标率 {finishStats.passRate}%
               </div>
             </div>
+            {pendingCount > 0 && (
+              <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center gap-2 text-amber-700 text-sm">
+                <Clock size={16} />
+                还有 {pendingCount} 条成绩待同步，网络恢复后将自动上传
+              </div>
+            )}
             <div className="p-6 space-y-3">
               <button
                 onClick={() => {

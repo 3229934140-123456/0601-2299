@@ -7,9 +7,12 @@ export function exportClassReport(
   classInfo: ClassInfo,
   students: Student[],
   projects: TestProject[],
-  records: TestRecord[]
+  records: TestRecord[],
+  sessionId?: string | null
 ) {
   const wb = XLSX.utils.book_new();
+
+  const filteredRecords = sessionId ? records.filter(r => r.sessionId === sessionId) : records;
 
   const basicData = [
     ["学号", "姓名", "性别", "年龄", "身高(cm)", "体重(kg)", "班级"],
@@ -40,7 +43,7 @@ export function exportClassReport(
     let totalPts = 0;
     let cnt = 0;
     projects.forEach((p) => {
-      const rec = records.find((r) => r.studentId === s.id && r.projectId === p.id);
+      const rec = filteredRecords.find((r) => r.studentId === s.id && r.projectId === p.id);
       if (rec && rec.score !== null) {
         row.push(rec.score);
         row.push(rec.points);
@@ -65,7 +68,7 @@ export function exportClassReport(
   const ws2 = XLSX.utils.aoa_to_sheet(scoreData);
   XLSX.utils.book_append_sheet(wb, ws2, "体测成绩");
 
-  const fileName = `${classInfo.name}_体测成绩_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const fileName = `${classInfo.name}_${sessionId ? "场次_" + sessionId.slice(-4) + "_" : ""}体测成绩_${new Date().toISOString().slice(0, 10)}.xlsx`;
   XLSX.writeFile(wb, fileName);
 }
 

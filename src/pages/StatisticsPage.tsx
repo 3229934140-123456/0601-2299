@@ -187,7 +187,7 @@ export default function StatisticsPage() {
 
   const handleExport = () => {
     if (!currentClass) return;
-    exportClassReport(currentClass, classStudents, projects, records.filter((r) => classStudentIds.has(r.studentId)));
+    exportClassReport(currentClass, classStudents, projects, records, currentSessionId);
   };
 
   const StatCard = ({

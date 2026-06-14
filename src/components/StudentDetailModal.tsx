@@ -14,6 +14,8 @@ import {
   History,
   Camera,
   AlertTriangle,
+  CheckCircle2,
+  Clock,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import { Avatar } from "@/components/Avatar";
@@ -35,7 +37,7 @@ interface StudentDetailModalProps {
 }
 
 export function StudentDetailModal({ open, studentId, onClose }: StudentDetailModalProps) {
-  const { students, classes, projects, records, logs } = useAppStore();
+  const { students, classes, projects, records, logs, sessions } = useAppStore();
   const [photoViewerOpen, setPhotoViewerOpen] = useState(false);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
 
@@ -78,6 +80,11 @@ export function StudentDetailModal({ open, studentId, onClose }: StudentDetailMo
 
   const getProjectType = (projectId: string) => {
     return projects.find((p) => p.id === projectId)?.type || "measuring";
+  };
+
+  const getSessionName = (sessionId: string | null) => {
+    if (!sessionId) return "-";
+    return sessions.find((s) => s.id === sessionId)?.name || "-";
   };
 
   const formatScore = (record: TestRecord) => {
@@ -313,6 +320,8 @@ export function StudentDetailModal({ open, studentId, onClose }: StudentDetailMo
                       <th className="px-4 py-2.5 text-left font-medium">得分</th>
                       <th className="px-4 py-2.5 text-left font-medium">等级</th>
                       <th className="px-4 py-2.5 text-left font-medium">状态</th>
+                      <th className="px-4 py-2.5 text-left font-medium">场次</th>
+                      <th className="px-4 py-2.5 text-left font-medium">同步</th>
                       <th className="px-4 py-2.5 text-left font-medium">更新时间</th>
                     </tr>
                   </thead>
@@ -354,6 +363,22 @@ export function StudentDetailModal({ open, studentId, onClose }: StudentDetailMo
                           <GradeBadge grade={record.grade} size="sm" />
                         </td>
                         <td className="px-4 py-3">{getStatusBadge(record.status)}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">
+                          {getSessionName(record.sessionId)}
+                        </td>
+                        <td className="px-4 py-3">
+                          {record.syncStatus === "synced" ? (
+                            <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
+                              <CheckCircle2 size={12} />
+                              已同步
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs text-amber-600">
+                              <Clock size={12} />
+                              待同步
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-3 text-xs text-slate-500">
                           {formatDate(record.updatedAt)}
                         </td>
@@ -361,7 +386,7 @@ export function StudentDetailModal({ open, studentId, onClose }: StudentDetailMo
                     ))}
                     {studentRecords.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="py-12 text-center text-slate-400">
+                        <td colSpan={8} className="py-12 text-center text-slate-400">
                           <FileSpreadsheet size={32} className="mx-auto mb-2 opacity-30" />
                           <div className="text-sm">暂无成绩记录</div>
                         </td>
