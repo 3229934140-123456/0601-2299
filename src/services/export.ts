@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
-import type { Student, TestRecord, TestProject, ClassInfo } from "@/types";
+import type { Student, TestRecord, TestProject, ClassInfo, TestSession } from "@/types";
 import { formatTime, genderLabel, gradeLabel, toFixedIfNeeded } from "@/utils";
 
 export function exportClassReport(
@@ -92,8 +92,15 @@ export function exportStudentReportExcel(
   student: Student,
   classInfo: ClassInfo,
   projects: TestProject[],
-  records: TestRecord[]
+  records: TestRecord[],
+  sessionId?: string | null,
+  sessions?: TestSession[]
 ) {
+  const filteredRecords = sessionId
+    ? records.filter((r) => r.studentId === student.id && r.sessionId === sessionId)
+    : records;
+  const sessionName = sessionId && sessions ? sessions.find((s) => s.id === sessionId)?.name : undefined;
+
   const wb = XLSX.utils.book_new();
 
   const basicData = [
@@ -106,8 +113,11 @@ export function exportStudentReportExcel(
     ["班级", classInfo.name],
     ["身高", student.height ? `${student.height} cm` : "-"],
     ["体重", student.weight ? `${student.weight} kg` : "-"],
-    ["导出时间", new Date().toLocaleString("zh-CN")],
   ];
+  if (sessionName) {
+    basicData.push(["场次", sessionName]);
+  }
+  basicData.push(["导出时间", new Date().toLocaleString("zh-CN")]);
   const ws1 = XLSX.utils.aoa_to_sheet(basicData);
   XLSX.utils.book_append_sheet(wb, ws1, "基本信息");
 
@@ -116,7 +126,7 @@ export function exportStudentReportExcel(
   let totalPts = 0;
   let testedCount = 0;
   projects.forEach((p) => {
-    const rec = records.find((r) => r.studentId === student.id && r.projectId === p.id);
+    const rec = filteredRecords.find((r) => r.studentId === student.id && r.projectId === p.id);
     const row: (string | number)[] = [p.name, p.unit];
     if (rec && rec.score !== null) {
       const displayScore = p.type === "timing" ? formatTime(rec.score) : toFixedIfNeeded(rec.score);
@@ -151,12 +161,12 @@ export function exportStudentReportExcel(
   scoreData.push(["统计", "", "", "", "", "", ""]);
   scoreData.push(["已测项目数", testedCount, "总分", totalPts, "", "", ""]);
   scoreData.push(["平均分", avg, "总评等级", gl, "", "", ""]);
-  scoreData.push(["达标率", testedCount > 0 ? `${Math.round(records.filter(r => r.studentId === student.id && r.grade && r.grade !== "fail").length / testedCount * 100)}%` : "-", "", "", "", "", ""]);
+  scoreData.push(["达标率", testedCount > 0 ? `${Math.round(filteredRecords.filter(r => r.studentId === student.id && r.grade && r.grade !== "fail").length / testedCount * 100)}%` : "-", "", "", "", "", ""]);
 
   const ws2 = XLSX.utils.aoa_to_sheet(scoreData);
   XLSX.utils.book_append_sheet(wb, ws2, "详细成绩");
 
-  const fileName = `${classInfo.name}_${student.name}_体测成绩单_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const fileName = `${classInfo.name}_${student.name}${sessionName ? `_${sessionName}` : ""}_体测成绩单_${new Date().toISOString().slice(0, 10)}.xlsx`;
   XLSX.writeFile(wb, fileName);
 }
 
@@ -164,8 +174,15 @@ export function exportStudentReportPDF(
   student: Student,
   classInfo: ClassInfo,
   projects: TestProject[],
-  records: TestRecord[]
+  records: TestRecord[],
+  sessionId?: string | null,
+  sessions?: TestSession[]
 ) {
+  const filteredRecords = sessionId
+    ? records.filter((r) => r.studentId === student.id && r.sessionId === sessionId)
+    : records;
+  const sessionName = sessionId && sessions ? sessions.find((s) => s.id === sessionId)?.name : undefined;
+
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
   const pageW = doc.internal.pageSize.getWidth();
   const marginL = 15;
@@ -192,6 +209,9 @@ export function exportStudentReportPDF(
     ["身高：", student.height ? `${student.height} cm` : "-"],
     ["体重：", student.weight ? `${student.weight} kg` : "-"],
   ];
+  if (sessionName) {
+    info.push(["场次：", sessionName]);
+  }
   info.forEach(([k, v], i) => {
     const col = i % 3;
     const row = Math.floor(i / 3);
@@ -229,7 +249,7 @@ export function exportStudentReportPDF(
       doc.addPage();
       y = 20;
     }
-    const rec = records.find((r) => r.studentId === student.id && r.projectId === p.id);
+    const rec = filteredRecords.find((r) => r.studentId === student.id && r.projectId === p.id);
     let scoreStr = "-";
     let ptsStr = "-";
     let gradeStr = "-";
@@ -283,6 +303,144 @@ export function exportStudentReportPDF(
   doc.setTextColor(120, 120, 120);
   doc.text("本成绩单由智慧体育体测系统自动生成 · 仅供参考", pageW / 2, 285, { align: "center" });
 
-  const fileName = `${classInfo.name}_${student.name}_体测成绩单_${new Date().toISOString().slice(0, 10)}.pdf`;
+  const fileName = `${classInfo.name}_${student.name}${sessionName ? `_${sessionName}` : ""}_体测成绩单_${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(fileName);
+}
+
+export function exportSessionComparison(
+  classInfo: ClassInfo,
+  students: Student[],
+  projects: TestProject[],
+  records: TestRecord[],
+  sessions: TestSession[],
+  sessionAId: string,
+  sessionBId: string
+) {
+  const sessionA = sessions.find((s) => s.id === sessionAId);
+  const sessionB = sessions.find((s) => s.id === sessionBId);
+  if (!sessionA || !sessionB) return;
+
+  const recordsA = records.filter((r) => r.sessionId === sessionAId && r.score !== null);
+  const recordsB = records.filter((r) => r.sessionId === sessionBId && r.score !== null);
+
+  const recMapA = new Map<string, TestRecord>();
+  recordsA.forEach((r) => recMapA.set(`${r.studentId}_${r.projectId}`, r));
+  const recMapB = new Map<string, TestRecord>();
+  recordsB.forEach((r) => recMapB.set(`${r.studentId}_${r.projectId}`, r));
+
+  const studentMap = new Map(students.map((s) => [s.id, s]));
+  const projectMap = new Map(projects.map((p) => [p.id, p]));
+
+  const allKeys = new Set([...recMapA.keys(), ...recMapB.keys()]);
+
+  const wb = XLSX.utils.book_new();
+
+  const detailHeader = ["学号", "姓名", "项目", "场次A成绩", "场次A得分", "场次A等级", "场次B成绩", "场次B得分", "场次B等级", "成绩差异", "得分差异", "达标变化"];
+  const detailData: (string | number)[][] = [detailHeader];
+
+  const makeupRows: (string | number)[][] = [];
+  let improveCount = 0;
+  let declineCount = 0;
+  let failToPassCount = 0;
+  let passToFailCount = 0;
+  let makeupCount = 0;
+  let makeupPassCount = 0;
+
+  const sortedKeys = Array.from(allKeys).sort();
+  sortedKeys.forEach((key) => {
+    const recA = recMapA.get(key);
+    const recB = recMapB.get(key);
+    const [studentId, projectId] = key.split("_");
+    const student = studentMap.get(studentId);
+    const project = projectMap.get(projectId);
+    if (!student || !project) return;
+
+    const isMakeup = !recA && !!recB;
+    if (isMakeup) {
+      makeupCount++;
+      if (recB!.grade && recB!.grade !== "fail") makeupPassCount++;
+    }
+
+    const fmtScore = (rec: TestRecord | undefined) => {
+      if (!rec || rec.score === null) return "-";
+      return project.type === "timing" ? formatTime(rec.score) : toFixedIfNeeded(rec.score);
+    };
+
+    const scoreDiff = (recA?.points ?? 0) - (recB?.points ?? 0);
+    const displayDiff = recA && recB ? (project.type === "timing"
+      ? toFixedIfNeeded(recB.score! - recA.score!)
+      : toFixedIfNeeded(recB.score! - recA.score!)) : "-";
+
+    let passChange = "-";
+    if (recA && recB) {
+      const aPass = recA.grade !== null && recA.grade !== "fail";
+      const bPass = recB.grade !== null && recB.grade !== "fail";
+      if (!aPass && bPass) { passChange = "不达标→达标"; failToPassCount++; }
+      else if (aPass && !bPass) { passChange = "达标→不达标"; passToFailCount++; }
+      else if (aPass && bPass) { passChange = "保持达标"; }
+      else { passChange = "保持不达标"; }
+
+      if (scoreDiff < 0) improveCount++;
+      else if (scoreDiff > 0) declineCount++;
+    }
+
+    const row: (string | number)[] = [
+      student.studentNo,
+      student.name,
+      project.name,
+      fmtScore(recA),
+      recA?.points ?? "-",
+      recA ? gradeLabel(recA.grade) : "-",
+      fmtScore(recB),
+      recB?.points ?? "-",
+      recB ? gradeLabel(recB.grade) : "-",
+      displayDiff,
+      recA && recB ? scoreDiff === 0 ? 0 : -scoreDiff : "-",
+      passChange,
+    ];
+    detailData.push(row);
+
+    if (isMakeup && recB) {
+      makeupRows.push([
+        student.studentNo,
+        student.name,
+        project.name,
+        fmtScore(recB),
+        recB.points,
+        gradeLabel(recB.grade),
+        recB.grade !== "fail" ? "达标" : "不达标",
+      ]);
+    }
+  });
+
+  const ws1 = XLSX.utils.aoa_to_sheet(detailData);
+  XLSX.utils.book_append_sheet(wb, ws1, "对比明细");
+
+  const makeupHeader = ["学号", "姓名", "项目", "成绩", "得分", "等级", "是否达标"];
+  const makeupData = [makeupHeader, ...makeupRows];
+  const ws2 = XLSX.utils.aoa_to_sheet(makeupData);
+  XLSX.utils.book_append_sheet(wb, ws2, "补测名单");
+
+  const summaryData: (string | number)[][] = [
+    ["场次对比统计摘要"],
+    [],
+    ["对比场次A", sessionA.name, "类型", sessionA.type === "formal" ? "正式" : sessionA.type === "makeup" ? "补测" : "其他", "时间", sessionA.startTime.slice(0, 10)],
+    ["对比场次B", sessionB.name, "类型", sessionB.type === "formal" ? "正式" : sessionB.type === "makeup" ? "补测" : "其他", "时间", sessionB.startTime.slice(0, 10)],
+    [],
+    ["统计项", "数值"],
+    ["对比记录总数", allKeys.size],
+    ["补测总人数", makeupCount],
+    ["补测后达标人数", makeupPassCount],
+    ["成绩提升人数", improveCount],
+    ["成绩下降人数", declineCount],
+    ["不达标→达标人数", failToPassCount],
+    ["达标→不达标人数", passToFailCount],
+    [],
+    ["导出时间", new Date().toLocaleString("zh-CN")],
+  ];
+  const ws3 = XLSX.utils.aoa_to_sheet(summaryData);
+  XLSX.utils.book_append_sheet(wb, ws3, "统计摘要");
+
+  const fileName = `${classInfo.name}_场次对比_${sessionA.name}_vs_${sessionB.name}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+  XLSX.writeFile(wb, fileName);
 }

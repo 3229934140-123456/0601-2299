@@ -16,6 +16,9 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import { Avatar } from "@/components/Avatar";
@@ -30,6 +33,8 @@ import { cn } from "@/lib/utils";
 import { exportStudentReportExcel, exportStudentReportPDF } from "@/services/export";
 import type { TestRecord, ScoreLog } from "@/types";
 
+type ScoreTab = "current" | "all";
+
 interface StudentDetailModalProps {
   open: boolean;
   studentId: string | null;
@@ -37,9 +42,10 @@ interface StudentDetailModalProps {
 }
 
 export function StudentDetailModal({ open, studentId, onClose }: StudentDetailModalProps) {
-  const { students, classes, projects, records, logs, sessions } = useAppStore();
+  const { students, classes, projects, records, logs, sessions, currentSessionId } = useAppStore();
   const [photoViewerOpen, setPhotoViewerOpen] = useState(false);
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
+  const [scoreTab, setScoreTab] = useState<ScoreTab>("current");
 
   const student = useMemo(
     () => students.find((s) => s.id === studentId),
@@ -51,24 +57,58 @@ export function StudentDetailModal({ open, studentId, onClose }: StudentDetailMo
     [classes, student]
   );
 
-  const studentRecords = useMemo(() => {
+  const allStudentRecords = useMemo(() => {
     if (!studentId) return [];
     return records
       .filter((r) => r.studentId === studentId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }, [records, studentId]);
 
+  const currentSessionRecords = useMemo(() => {
+    if (!currentSessionId) return allStudentRecords;
+    return allStudentRecords.filter((r) => r.sessionId === currentSessionId);
+  }, [allStudentRecords, currentSessionId]);
+
+  const displayRecords = scoreTab === "current" ? currentSessionRecords : allStudentRecords;
+
   const allPhotos = useMemo(() => {
-    return studentRecords.flatMap((r) => r.photos.map((p) => ({ photo: p, recordId: r.id })));
-  }, [studentRecords]);
+    return allStudentRecords.flatMap((r) => r.photos.map((p) => ({ photo: p, recordId: r.id })));
+  }, [allStudentRecords]);
 
   const studentLogs = useMemo(() => {
     if (!studentId) return [];
-    const recordIds = new Set(studentRecords.map((r) => r.id));
+    const recordIds = new Set(allStudentRecords.map((r) => r.id));
     return logs
       .filter((l) => recordIds.has(l.recordId))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }, [logs, studentRecords, studentId]);
+  }, [logs, allStudentRecords, studentId]);
+
+  const projectDiffMap = useMemo(() => {
+    const map = new Map<string, { diff: number; label: string; type: "up" | "down" | "same" }>();
+    if (!studentId) return map;
+    const projectIds = [...new Set(allStudentRecords.map((r) => r.projectId))];
+    for (const pid of projectIds) {
+      const recs = allStudentRecords.filter((r) => r.projectId === pid && r.score !== null);
+      if (recs.length < 2) continue;
+      const sorted = [...recs].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt));
+      const latest = sorted[sorted.length - 1];
+      const prev = sorted[sorted.length - 2];
+      const diff = latest.points - prev.points;
+      if (diff > 0) {
+        map.set(pid, { diff, label: `+${diff}分`, type: "up" });
+      } else if (diff < 0) {
+        map.set(pid, { diff, label: `${diff}分`, type: "down" });
+      } else {
+        map.set(pid, { diff, label: "持平", type: "same" });
+      }
+    }
+    return map;
+  }, [allStudentRecords, studentId]);
+
+  const currentSessionName = useMemo(() => {
+    if (!currentSessionId) return "-";
+    return sessions.find((s) => s.id === currentSessionId)?.name || "-";
+  }, [sessions, currentSessionId]);
 
   const getProjectName = (projectId: string) => {
     return projects.find((p) => p.id === projectId)?.name || "-";
@@ -95,13 +135,13 @@ export function StudentDetailModal({ open, studentId, onClose }: StudentDetailMo
 
   const handleExportExcel = () => {
     if (student && classInfo) {
-      exportStudentReportExcel(student, classInfo, projects, records);
+      exportStudentReportExcel(student, classInfo, projects, records, currentSessionId, sessions);
     }
   };
 
   const handleExportPDF = () => {
     if (student && classInfo) {
-      exportStudentReportPDF(student, classInfo, projects, records);
+      exportStudentReportPDF(student, classInfo, projects, records, currentSessionId, sessions);
     }
   };
 
@@ -305,12 +345,42 @@ export function StudentDetailModal({ open, studentId, onClose }: StudentDetailMo
               <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
                 <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">
                   <FileSpreadsheet size={16} className="text-primary-500" />
-                  历史成绩
+                  成绩记录
                 </div>
-                <span className="text-xs text-slate-400">
-                  共 {studentRecords.length} 条记录
-                </span>
+                <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
+                  <button
+                    onClick={() => setScoreTab("current")}
+                    className={cn(
+                      "px-3 py-1 rounded-md text-xs font-medium transition",
+                      scoreTab === "current"
+                        ? "bg-white text-primary-700 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    )}
+                  >
+                    本场成绩
+                  </button>
+                  <button
+                    onClick={() => setScoreTab("all")}
+                    className={cn(
+                      "px-3 py-1 rounded-md text-xs font-medium transition",
+                      scoreTab === "all"
+                        ? "bg-white text-primary-700 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    )}
+                  >
+                    全部历史
+                  </button>
+                </div>
               </div>
+
+              {scoreTab === "current" && (
+                <div className="px-4 py-2 bg-primary-50/50 border-b border-primary-100">
+                  <span className="text-xs text-primary-600 font-medium">
+                    当前场次：{currentSessionName} · {currentSessionRecords.length} 条记录
+                  </span>
+                </div>
+              )}
+
               <div className="max-h-[320px] overflow-y-auto scrollbar-thin">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 sticky top-0 z-10">
@@ -320,75 +390,101 @@ export function StudentDetailModal({ open, studentId, onClose }: StudentDetailMo
                       <th className="px-4 py-2.5 text-left font-medium">得分</th>
                       <th className="px-4 py-2.5 text-left font-medium">等级</th>
                       <th className="px-4 py-2.5 text-left font-medium">状态</th>
-                      <th className="px-4 py-2.5 text-left font-medium">场次</th>
+                      {scoreTab === "all" && (
+                        <th className="px-4 py-2.5 text-left font-medium">场次</th>
+                      )}
                       <th className="px-4 py-2.5 text-left font-medium">同步</th>
                       <th className="px-4 py-2.5 text-left font-medium">更新时间</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {studentRecords.map((record, idx) => (
-                      <tr
-                        key={record.id}
-                        className={cn(
-                          "border-t border-slate-100 transition",
-                          idx % 2 && "bg-slate-50/40",
-                          record.status === "abnormal" && "bg-rose-50/50"
-                        )}
-                      >
-                        <td className="px-4 py-3 text-slate-700">
-                          {getProjectName(record.projectId)}
-                        </td>
-                        <td className="px-4 py-3">
-                          {record.score !== null ? (
+                    {displayRecords.map((record, idx) => {
+                      const diff = projectDiffMap.get(record.projectId);
+                      return (
+                        <tr
+                          key={record.id}
+                          className={cn(
+                            "border-t border-slate-100 transition",
+                            idx % 2 && "bg-slate-50/40",
+                            record.status === "abnormal" && "bg-rose-50/50"
+                          )}
+                        >
+                          <td className="px-4 py-3 text-slate-700">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-mono font-semibold text-slate-900 tabular-nums">
-                                {formatScore(record)}
-                              </span>
-                              <span className="text-xs text-slate-400">
-                                {getProjectUnit(record.projectId)}
-                              </span>
+                              {getProjectName(record.projectId)}
+                              {scoreTab === "all" && diff && (
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold",
+                                    diff.type === "up" && "bg-emerald-50 text-emerald-700",
+                                    diff.type === "down" && "bg-rose-50 text-rose-700",
+                                    diff.type === "same" && "bg-slate-100 text-slate-500"
+                                  )}
+                                >
+                                  {diff.type === "up" && <TrendingUp size={10} />}
+                                  {diff.type === "down" && <TrendingDown size={10} />}
+                                  {diff.type === "same" && <Minus size={10} />}
+                                  {diff.label}
+                                </span>
+                              )}
                             </div>
-                          ) : (
-                            <span className="text-slate-400">-</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {record.score !== null ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono font-semibold text-slate-900 tabular-nums">
+                                  {formatScore(record)}
+                                </span>
+                                <span className="text-xs text-slate-400">
+                                  {getProjectUnit(record.projectId)}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {record.score !== null ? (
+                              <span className="text-slate-900 font-medium">{record.points} 分</span>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <GradeBadge grade={record.grade} size="sm" />
+                          </td>
+                          <td className="px-4 py-3">{getStatusBadge(record.status)}</td>
+                          {scoreTab === "all" && (
+                            <td className="px-4 py-3 text-xs text-slate-600">
+                              {getSessionName(record.sessionId)}
+                            </td>
                           )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {record.score !== null ? (
-                            <span className="text-slate-900 font-medium">{record.points} 分</span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <GradeBadge grade={record.grade} size="sm" />
-                        </td>
-                        <td className="px-4 py-3">{getStatusBadge(record.status)}</td>
-                        <td className="px-4 py-3 text-xs text-slate-600">
-                          {getSessionName(record.sessionId)}
-                        </td>
-                        <td className="px-4 py-3">
-                          {record.syncStatus === "synced" ? (
-                            <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
-                              <CheckCircle2 size={12} />
-                              已同步
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-xs text-amber-600">
-                              <Clock size={12} />
-                              待同步
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-xs text-slate-500">
-                          {formatDate(record.updatedAt)}
-                        </td>
-                      </tr>
-                    ))}
-                    {studentRecords.length === 0 && (
+                          <td className="px-4 py-3">
+                            {record.syncStatus === "synced" ? (
+                              <span className="inline-flex items-center gap-1 text-xs text-emerald-600">
+                                <CheckCircle2 size={12} />
+                                已同步
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs text-amber-600">
+                                <Clock size={12} />
+                                待同步
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-slate-500">
+                            {formatDate(record.updatedAt)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {displayRecords.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="py-12 text-center text-slate-400">
+                        <td colSpan={scoreTab === "all" ? 8 : 7} className="py-12 text-center text-slate-400">
                           <FileSpreadsheet size={32} className="mx-auto mb-2 opacity-30" />
-                          <div className="text-sm">暂无成绩记录</div>
+                          <div className="text-sm">
+                            {scoreTab === "current" ? "本场暂无成绩记录" : "暂无成绩记录"}
+                          </div>
                         </td>
                       </tr>
                     )}
@@ -431,7 +527,7 @@ export function StudentDetailModal({ open, studentId, onClose }: StudentDetailMo
                                 </span>
                                 <span className="text-xs text-slate-400">
                                   {getProjectName(
-                                    studentRecords.find((r) => r.id === log.recordId)?.projectId || ""
+                                    allStudentRecords.find((r) => r.id === log.recordId)?.projectId || ""
                                   )}
                                 </span>
                               </div>

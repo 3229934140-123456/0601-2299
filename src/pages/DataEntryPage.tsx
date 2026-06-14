@@ -83,7 +83,15 @@ export default function DataEntryPage() {
   const [inputValue, setInputValue] = useState<string>("");
   const [savedPulse, setSavedPulse] = useState(false);
   const [showFinishModal, setShowFinishModal] = useState(false);
+  const [warningDismissed, setWarningDismissed] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setInputValue("");
+    setShowFinishModal(false);
+    setWarningDismissed(false);
+    setCurrentEntryStudentIndex(0);
+  }, [currentProjectId, currentSessionId, setCurrentEntryStudentIndex]);
 
   useEffect(() => {
     if (existingRecord && existingRecord.score !== null) {
@@ -91,16 +99,14 @@ export default function DataEntryPage() {
     } else {
       setInputValue("");
     }
-  }, [currentStudent?.id, currentProjectId, existingRecord?.score]);
+    setWarningDismissed(false);
+  }, [currentStudent?.id, existingRecord?.score]);
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, [clampedIndex, currentProjectId, showFinishModal]);
-
-  useEffect(() => {
-    setInputValue("");
-    setShowFinishModal(false);
-  }, [currentProjectId]);
+    if (currentProject && !showFinishModal) {
+      inputRef.current?.focus();
+    }
+  }, [clampedIndex, currentProjectId, showFinishModal, currentProject]);
 
   const computed = useMemo(() => {
     if (!currentStudent || !currentProject || !inputValue) return null;
@@ -203,14 +209,19 @@ export default function DataEntryPage() {
       <div className="h-full flex flex-col items-center justify-center p-10 text-center">
         <Zap size={64} className="text-slate-300" />
         <div className="mt-4 text-lg font-semibold text-slate-700">请先选择测试项目</div>
-        <div className="mt-1 text-sm text-slate-500">前往「项目测试」页面选择要录入的项目</div>
+        <div className="mt-1 text-sm text-slate-500">前往「项目测试」页面选择，或点击下方快速选择</div>
         {projects.length > 0 && (
-          <button
-            onClick={() => setCurrentProject(projects[0].id)}
-            className="mt-6 btn-primary"
-          >
-            快速选择：{projects[0].name}
-          </button>
+          <div className="mt-6 grid grid-cols-3 gap-3 max-w-lg">
+            {projects.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setCurrentProject(p.id)}
+                className="btn-secondary text-sm"
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
         )}
       </div>
     );

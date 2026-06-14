@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   BarChart,
   Bar,
@@ -31,13 +31,17 @@ import {
   ChevronDown,
   BarChart3,
   PieChart as PieIcon,
+  GitCompareArrows,
+  ArrowUpRight,
+  ArrowDownRight,
 } from "lucide-react";
 import { useAppStore } from "@/store";
-import { exportClassReport } from "@/services/export";
+import { exportClassReport, exportSessionComparison } from "@/services/export";
 import { Avatar } from "@/components/Avatar";
 import { SessionSelector } from "@/components/SessionSelector";
 import { cn } from "@/lib/utils";
 import { gradeLabel, formatDateShort, formatTime, toFixedIfNeeded } from "@/utils";
+import type { GradeLevel } from "@/types";
 
 const GRADE_COLORS = ["#10B981", "#0EA5E9", "#F59E0B", "#EF4444"];
 
@@ -53,7 +57,12 @@ export default function StatisticsPage() {
     teachers,
     currentTeacher,
     currentSessionId,
+    sessions,
+    getRecordsBySession,
   } = useAppStore();
+
+  const [compSessionA, setCompSessionA] = useState<string>("");
+  const [compSessionB, setCompSessionB] = useState<string>("");
 
   const currentClass = classes.find((c) => c.id === currentClassId);
   const classStudents = useMemo(
@@ -188,6 +197,138 @@ export default function StatisticsPage() {
   const handleExport = () => {
     if (!currentClass) return;
     exportClassReport(currentClass, classStudents, projects, records, currentSessionId);
+  };
+
+  const classSessions = useMemo(
+    () => sessions.filter((s) => s.classId === currentClassId),
+    [sessions, currentClassId]
+  );
+
+  const comparisonResult = useMemo(() => {
+    if (!compSessionA || !compSessionB || compSessionA === compSessionB) return null;
+
+    const recsA = getRecordsBySession(compSessionA).filter(
+      (r) => classStudentIds.has(r.studentId) && r.score !== null
+    );
+    const recsB = getRecordsBySession(compSessionB).filter(
+      (r) => classStudentIds.has(r.studentId) && r.score !== null
+    );
+
+    const mapA = new Map<string, (typeof recsA)[0]>();
+    recsA.forEach((r) => mapA.set(`${r.studentId}_${r.projectId}`, r));
+    const mapB = new Map<string, (typeof recsB)[0]>();
+    recsB.forEach((r) => mapB.set(`${r.studentId}_${r.projectId}`, r));
+
+    const allKeys = new Set([...mapA.keys(), ...mapB.keys()]);
+    const studentMap = new Map(classStudents.map((s) => [s.id, s]));
+    const projectMap = new Map(projects.map((p) => [p.id, p]));
+
+    type CompRow = {
+      studentId: string;
+      studentName: string;
+      studentNo: string;
+      projectId: string;
+      projectName: string;
+      projectType: string;
+      scoreA: number | null;
+      pointsA: number;
+      gradeA: GradeLevel | null;
+      scoreB: number | null;
+      pointsB: number;
+      gradeB: GradeLevel | null;
+      scoreDiff: number | null;
+      pointsDiff: number | null;
+      passChange: string;
+      isMakeup: boolean;
+    };
+
+    const rows: CompRow[] = [];
+    let improveCount = 0;
+    let declineCount = 0;
+    let failToPassCount = 0;
+    let passToFailCount = 0;
+    let makeupCount = 0;
+    let makeupPassCount = 0;
+
+    allKeys.forEach((key) => {
+      const recA = mapA.get(key);
+      const recB = mapB.get(key);
+      const [sid, pid] = key.split("_");
+      const stu = studentMap.get(sid);
+      const proj = projectMap.get(pid);
+      if (!stu || !proj) return;
+
+      const isMakeup = !recA && !!recB;
+      if (isMakeup) {
+        makeupCount++;
+        if (recB!.grade && recB!.grade !== "fail") makeupPassCount++;
+      }
+
+      let passChange = "-";
+      let ptsDiff: number | null = null;
+      let sDiff: number | null = null;
+
+      if (recA && recB) {
+        ptsDiff = recB.points - recA.points;
+        sDiff = proj.type === "timing"
+          ? recA.score! - recB.score!
+          : recB.score! - recA.score!;
+        const aPass = recA.grade !== null && recA.grade !== "fail";
+        const bPass = recB.grade !== null && recB.grade !== "fail";
+        if (!aPass && bPass) { passChange = "up"; failToPassCount++; }
+        else if (aPass && !bPass) { passChange = "down"; passToFailCount++; }
+        else if (aPass && bPass) { passChange = "same-pass"; }
+        else { passChange = "same-fail"; }
+        if (ptsDiff > 0) improveCount++;
+        else if (ptsDiff < 0) declineCount++;
+      }
+
+      rows.push({
+        studentId: sid,
+        studentName: stu.name,
+        studentNo: stu.studentNo,
+        projectId: pid,
+        projectName: proj.name,
+        projectType: proj.type,
+        scoreA: recA?.score ?? null,
+        pointsA: recA?.points ?? 0,
+        gradeA: recA?.grade ?? null,
+        scoreB: recB?.score ?? null,
+        pointsB: recB?.points ?? 0,
+        gradeB: recB?.grade ?? null,
+        scoreDiff: sDiff,
+        pointsDiff: ptsDiff,
+        passChange,
+        isMakeup,
+      });
+    });
+
+    const makeupRows = rows.filter((r) => r.isMakeup);
+
+    rows.sort((a, b) => {
+      const sc = a.studentNo.localeCompare(b.studentNo);
+      return sc !== 0 ? sc : a.projectName.localeCompare(b.projectName);
+    });
+    makeupRows.sort((a, b) => a.studentNo.localeCompare(b.studentNo));
+
+    return {
+      rows,
+      makeupRows,
+      improveCount,
+      declineCount,
+      failToPassCount,
+      passToFailCount,
+      makeupCount,
+      makeupPassCount,
+    };
+  }, [compSessionA, compSessionB, getRecordsBySession, classStudentIds, classStudents, projects]);
+
+  const handleExportComparison = () => {
+    if (!currentClass || !compSessionA || !compSessionB) return;
+    exportSessionComparison(
+      currentClass, classStudents, projects, records, sessions,
+      compSessionA, compSessionB
+    );
   };
 
   const StatCard = ({
@@ -548,6 +689,275 @@ export default function StatisticsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <div className="card overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <GitCompareArrows size={18} className="text-violet-500" />
+              <h3 className="font-semibold text-slate-800">场次对比</h3>
+            </div>
+            <button
+              onClick={handleExportComparison}
+              disabled={!comparisonResult}
+              className="btn-secondary !py-1.5 !text-xs disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Download size={14} />
+              导出对比表
+            </button>
+          </div>
+          <div className="px-5 py-4 space-y-4">
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-600">场次 A</span>
+                <select
+                  value={compSessionA}
+                  onChange={(e) => setCompSessionA(e.target.value)}
+                  className="input !w-48"
+                >
+                  <option value="">请选择场次</option>
+                  {classSessions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}（{s.type === "formal" ? "正式" : s.type === "makeup" ? "补测" : "其他"}）
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <span className="text-slate-400 text-sm font-medium">vs</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-600">场次 B</span>
+                <select
+                  value={compSessionB}
+                  onChange={(e) => setCompSessionB(e.target.value)}
+                  className="input !w-48"
+                >
+                  <option value="">请选择场次</option>
+                  {classSessions.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}（{s.type === "formal" ? "正式" : s.type === "makeup" ? "补测" : "其他"}）
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {compSessionA && compSessionB && compSessionA === compSessionB && (
+              <div className="text-sm text-amber-600 bg-amber-50 px-4 py-2 rounded-xl">
+                请选择两个不同的场次进行对比
+              </div>
+            )}
+
+            {comparisonResult && (
+              <>
+                {comparisonResult.rows.length === 0 ? (
+                  <div className="text-sm text-slate-500 py-4 text-center">
+                    所选场暂无对比数据
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="rounded-xl bg-emerald-50 px-4 py-3 text-center">
+                        <div className="text-2xl font-bold text-emerald-600 tabular-nums">
+                          {comparisonResult.improveCount}
+                        </div>
+                        <div className="text-xs text-emerald-700 mt-0.5">提升人数</div>
+                      </div>
+                      <div className="rounded-xl bg-rose-50 px-4 py-3 text-center">
+                        <div className="text-2xl font-bold text-rose-600 tabular-nums">
+                          {comparisonResult.declineCount}
+                        </div>
+                        <div className="text-xs text-rose-700 mt-0.5">下降人数</div>
+                      </div>
+                      <div className="rounded-xl bg-sky-50 px-4 py-3 text-center">
+                        <div className="text-2xl font-bold text-sky-600 tabular-nums">
+                          {comparisonResult.failToPassCount}
+                        </div>
+                        <div className="text-xs text-sky-700 mt-0.5">不达标→达标</div>
+                      </div>
+                      <div className="rounded-xl bg-amber-50 px-4 py-3 text-center">
+                        <div className="text-2xl font-bold text-amber-600 tabular-nums">
+                          {comparisonResult.makeupCount}
+                        </div>
+                        <div className="text-xs text-amber-700 mt-0.5">补测人数</div>
+                      </div>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 text-slate-600">
+                          <tr>
+                            <th className="px-4 py-2.5 text-left font-medium">学生</th>
+                            <th className="px-4 py-2.5 text-left font-medium">项目</th>
+                            <th className="px-4 py-2.5 text-center font-medium">场次A成绩/得分</th>
+                            <th className="px-4 py-2.5 text-center font-medium">场次B成绩/得分</th>
+                            <th className="px-4 py-2.5 text-center font-medium">差异</th>
+                            <th className="px-4 py-2.5 text-center font-medium">达标变化</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {comparisonResult.rows.map((row) => {
+                            const diffColor =
+                              row.pointsDiff === null
+                                ? ""
+                                : row.pointsDiff > 0
+                                  ? "text-emerald-600"
+                                  : row.pointsDiff < 0
+                                    ? "text-rose-600"
+                                    : "text-slate-500";
+                            const passLabel =
+                              row.passChange === "up"
+                                ? "不达标→达标"
+                                : row.passChange === "down"
+                                  ? "达标→不达标"
+                                  : row.passChange === "same-pass"
+                                    ? "保持达标"
+                                    : row.passChange === "same-fail"
+                                      ? "保持不达标"
+                                      : "-";
+                            const passColor =
+                              row.passChange === "up"
+                                ? "bg-emerald-50 text-emerald-700"
+                                : row.passChange === "down"
+                                  ? "bg-rose-50 text-rose-700"
+                                  : "bg-slate-50 text-slate-500";
+
+                            const fmtScore = (score: number | null, type: string) => {
+                              if (score === null) return "-";
+                              return type === "timing" ? formatTime(score) : toFixedIfNeeded(score);
+                            };
+
+                            return (
+                              <tr
+                                key={`${row.studentId}_${row.projectId}`}
+                                className="border-t border-slate-100 hover:bg-slate-50/50"
+                              >
+                                <td className="px-4 py-2.5">
+                                  <div className="font-medium text-slate-800">{row.studentName}</div>
+                                  <div className="text-[11px] text-slate-400">{row.studentNo}</div>
+                                </td>
+                                <td className="px-4 py-2.5 text-slate-700">
+                                  {row.projectName}
+                                  {row.isMakeup && (
+                                    <span className="ml-1.5 tag bg-amber-50 text-amber-700 border border-amber-200">
+                                      补测
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 text-center">
+                                  {row.scoreA !== null ? (
+                                    <div>
+                                      <span className="font-mono font-semibold text-slate-800 tabular-nums">
+                                        {fmtScore(row.scoreA, row.projectType)}
+                                      </span>
+                                      <span className="text-xs text-slate-400 ml-1">/ {row.pointsA}分</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400">-</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 text-center">
+                                  {row.scoreB !== null ? (
+                                    <div>
+                                      <span className="font-mono font-semibold text-slate-800 tabular-nums">
+                                        {fmtScore(row.scoreB, row.projectType)}
+                                      </span>
+                                      <span className="text-xs text-slate-400 ml-1">/ {row.pointsB}分</span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400">-</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 text-center">
+                                  {row.pointsDiff !== null ? (
+                                    <span className={cn("font-mono font-semibold tabular-nums inline-flex items-center gap-0.5", diffColor)}>
+                                      {row.pointsDiff > 0 ? <ArrowUpRight size={14} /> : row.pointsDiff < 0 ? <ArrowDownRight size={14} /> : null}
+                                      {row.pointsDiff > 0 ? "+" : ""}{row.pointsDiff}分
+                                    </span>
+                                  ) : (
+                                    <span className="text-slate-400">-</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2.5 text-center">
+                                  <span className={cn("tag", passColor)}>{passLabel}</span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {comparisonResult.makeupRows.length > 0 && (
+                      <div className="mt-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="text-sm font-semibold text-slate-800">补测名单</span>
+                          <span className="tag bg-amber-50 text-amber-700 border border-amber-200">
+                            {comparisonResult.makeupCount} 人
+                          </span>
+                          <span className="text-xs text-slate-400">
+                            场次B中有记录但场次A中没有
+                          </span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-amber-50/60 text-slate-600">
+                              <tr>
+                                <th className="px-4 py-2.5 text-left font-medium">学生</th>
+                                <th className="px-4 py-2.5 text-left font-medium">项目</th>
+                                <th className="px-4 py-2.5 text-center font-medium">成绩</th>
+                                <th className="px-4 py-2.5 text-center font-medium">得分</th>
+                                <th className="px-4 py-2.5 text-center font-medium">等级</th>
+                                <th className="px-4 py-2.5 text-center font-medium">是否达标</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {comparisonResult.makeupRows.map((row) => (
+                                <tr
+                                  key={`makeup_${row.studentId}_${row.projectId}`}
+                                  className="border-t border-slate-100 hover:bg-amber-50/30"
+                                >
+                                  <td className="px-4 py-2.5 font-medium text-slate-800">{row.studentName}</td>
+                                  <td className="px-4 py-2.5 text-slate-700">{row.projectName}</td>
+                                  <td className="px-4 py-2.5 text-center font-mono tabular-nums text-slate-800">
+                                    {row.scoreB !== null
+                                      ? row.projectType === "timing"
+                                        ? formatTime(row.scoreB)
+                                        : toFixedIfNeeded(row.scoreB)
+                                      : "-"}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-center font-mono tabular-nums">{row.pointsB}</td>
+                                  <td className="px-4 py-2.5 text-center">{gradeLabel(row.gradeB)}</td>
+                                  <td className="px-4 py-2.5 text-center">
+                                    {row.gradeB && row.gradeB !== "fail" ? (
+                                      <span className="tag bg-emerald-50 text-emerald-700">达标</span>
+                                    ) : (
+                                      <span className="tag bg-rose-50 text-rose-700">不达标</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="mt-2 text-xs text-slate-500">
+                          补测后达标人数：
+                          <span className="font-semibold text-emerald-600">{comparisonResult.makeupPassCount}</span>
+                          {" / "}
+                          {comparisonResult.makeupCount} 人
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+
+            {!compSessionA && !compSessionB && (
+              <div className="py-6 text-center text-sm text-slate-400">
+                请选择两个场次进行对比分析
+              </div>
+            )}
           </div>
         </div>
       </div>

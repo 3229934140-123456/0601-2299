@@ -91,6 +91,8 @@ interface AppState {
   createSession: (session: Omit<TestSession, "id">) => void;
   setIsOnline: (online: boolean) => void;
   syncPendingRecords: () => void;
+  retrySync: (recordId: string) => void;
+  markSyncFailed: (recordId: string) => void;
   getRecordsBySession: (sessionId: string) => TestRecord[];
 
   getFilteredStudents: () => Student[];
@@ -353,6 +355,29 @@ export const useAppStore = create<AppState>()(
           records: state.records.map((r) =>
             r.syncStatus === "pending"
               ? { ...r, syncStatus: "synced" as SyncStatus, syncedAt: now }
+              : r
+          ),
+        });
+      },
+
+      retrySync: (recordId) => {
+        const state = get();
+        const now = new Date().toISOString();
+        set({
+          records: state.records.map((r) =>
+            r.id === recordId
+              ? { ...r, syncStatus: "synced" as SyncStatus, syncedAt: now }
+              : r
+          ),
+        });
+      },
+
+      markSyncFailed: (recordId) => {
+        const state = get();
+        set({
+          records: state.records.map((r) =>
+            r.id === recordId
+              ? { ...r, syncStatus: "failed" as SyncStatus }
               : r
           ),
         });
