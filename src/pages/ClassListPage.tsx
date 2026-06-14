@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Search, ScanLine, Users, CheckSquare, CalendarDays, Filter, ChevronDown, XCircle, Clock, ShieldCheck, UserCheck } from "lucide-react";
 import { useAppStore } from "@/store";
 import { Avatar } from "@/components/Avatar";
+import { SessionSelector } from "@/components/SessionSelector";
 import { ScanModal } from "@/components/ScanModal";
 import { attendanceLabel, attendanceTextColor, genderLabel } from "@/utils";
 import { cn } from "@/lib/utils";
@@ -136,6 +137,7 @@ export default function ClassListPage() {
           </div>
 
           <div className="flex items-center gap-3">
+            <SessionSelector className="!w-56" compact />
             <div className="relative">
               <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input

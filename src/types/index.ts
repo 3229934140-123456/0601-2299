@@ -3,6 +3,18 @@ export type ProjectType = "timing" | "counting" | "measuring";
 export type RecordStatus = "normal" | "abnormal" | "absent" | "delayed";
 export type GradeLevel = "excellent" | "good" | "pass" | "fail";
 export type Gender = "male" | "female";
+export type SyncStatus = "synced" | "pending" | "failed";
+
+export interface TestSession {
+  id: string;
+  name: string;
+  type: "formal" | "makeup" | "other";
+  startTime: string;
+  endTime?: string;
+  classId: string;
+  teacherId: string;
+  remark?: string;
+}
 
 export interface Teacher {
   id: string;
@@ -50,14 +62,17 @@ export interface TestRecord {
   studentId: string;
   projectId: string;
   teacherId: string;
+  sessionId: string | null;
   score: number | null;
   points: number;
   grade: GradeLevel | null;
   status: RecordStatus;
   reviewed: boolean;
   photos: string[];
+  syncStatus: SyncStatus;
   createdAt: string;
   updatedAt: string;
+  syncedAt?: string;
   remark?: string;
 }
 

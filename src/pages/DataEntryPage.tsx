@@ -21,6 +21,7 @@ import { useNavigate } from "react-router-dom";
 import { useAppStore } from "@/store";
 import { Avatar } from "@/components/Avatar";
 import { GradeBadge } from "@/components/GradeBadge";
+import { SessionSelector } from "@/components/SessionSelector";
 import { Timer as TimerComp } from "@/components/Timer";
 import { CameraModal } from "@/components/CameraModal";
 import { ScanModal } from "@/components/ScanModal";
@@ -49,6 +50,8 @@ export default function DataEntryPage() {
     setCurrentEntryStudentIndex,
     setCameraModalOpen,
     setScanModalOpen,
+    isOnline,
+    records,
   } = useAppStore();
 
   const students = useMemo(() => getFilteredStudents(), [getFilteredStudents]);
@@ -217,8 +220,30 @@ export default function DataEntryPage() {
     );
   }
 
+  const finishStats = useMemo(() => {
+    const applicableIds = new Set(applicableStudents.map((s) => s.id));
+    const sessionRecords = records.filter(
+      (r) =>
+        r.projectId === currentProjectId &&
+        applicableIds.has(r.studentId) &&
+        r.score !== null
+    );
+    const recordedCount = sessionRecords.length;
+    const passedCount = sessionRecords.filter(
+      (r) => r.grade === "excellent" || r.grade === "good" || r.grade === "pass"
+    ).length;
+    const passRate = recordedCount > 0 ? Math.round((passedCount / recordedCount) * 100) : 0;
+    return { recordedCount, passRate };
+  }, [records, currentProjectId, applicableStudents]);
+
   return (
     <div className="h-full flex flex-col overflow-hidden">
+      {!isOnline && (
+        <div className="bg-amber-500 text-white text-center py-2 text-sm font-medium flex items-center justify-center gap-2">
+          <AlertTriangle size={16} />
+          当前处于离线模式，成绩暂存本地
+        </div>
+      )}
       <header className="bg-white border-b border-slate-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex-1">
@@ -247,6 +272,7 @@ export default function DataEntryPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <SessionSelector className="!w-56" compact />
             <select
               value={currentProjectId || ""}
               onChange={(e) => setCurrentProject(e.target.value)}
@@ -601,26 +627,11 @@ export default function DataEntryPage() {
               </div>
               <h3 className="mt-4 text-2xl font-bold">本项目录入完成</h3>
               <div className="mt-1.5 text-white/80 text-sm">
-                共完成 {recordedCount} 名学生的「{currentProject.name}」成绩录入
+                共完成 {finishStats.recordedCount} 名学生的「{currentProject.name}」成绩录入
               </div>
               <div className="mt-4 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/15 backdrop-blur text-sm">
                 <CheckCircle2 size={14} />
-                达标率 {applicableStudents.length > 0
-                  ? Math.round(
-                      (applicableStudents.filter((s) => {
-                        const r = getStudentRecordForProject(s.id, currentProjectId!);
-                        return (
-                          r &&
-                          r.score !== null &&
-                          (r.grade === "excellent" ||
-                            r.grade === "good" ||
-                            r.grade === "pass")
-                        );
-                      }).length / recordedCount || 1
-                    ) * 100
-                  )
-                  : 0}
-                %
+                达标率 {finishStats.passRate}%
               </div>
             </div>
             <div className="p-6 space-y-3">

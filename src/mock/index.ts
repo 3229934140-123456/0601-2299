@@ -1,4 +1,4 @@
-import type { Teacher, ClassInfo, Student, TestProject, StandardItem, TestRecord, ScoreLog } from "@/types";
+import type { Teacher, ClassInfo, Student, TestProject, StandardItem, TestRecord, ScoreLog, TestSession } from "@/types";
 
 export const mockTeachers: Teacher[] = [
   { id: "t1", name: "张建国", employeeNo: "T2021001", subject: "体育" },
@@ -235,6 +235,56 @@ export const mockStandards: StandardItem[] = [
   { projectId: "p_sit_up", gender: "female", ageRange: [15, 18], grade: "fail", minScore: 0, maxScore: 24, points: 50 },
 ];
 
+export const mockSessions: TestSession[] = [
+  {
+    id: "sess_001",
+    name: "上午第一组正式测试",
+    type: "formal",
+    startTime: "2024-06-15T08:00:00.000Z",
+    endTime: "2024-06-15T10:00:00.000Z",
+    classId: "c1",
+    teacherId: "t1",
+    remark: "高一年级首次体测",
+  },
+  {
+    id: "sess_002",
+    name: "上午第二组正式测试",
+    type: "formal",
+    startTime: "2024-06-15T10:00:00.000Z",
+    endTime: "2024-06-15T12:00:00.000Z",
+    classId: "c2",
+    teacherId: "t1",
+  },
+  {
+    id: "sess_003",
+    name: "下午补测",
+    type: "makeup",
+    startTime: "2024-06-15T14:00:00.000Z",
+    endTime: "2024-06-15T16:00:00.000Z",
+    classId: "c1",
+    teacherId: "t2",
+    remark: "请假学生补测",
+  },
+  {
+    id: "sess_004",
+    name: "高二(1)班正式测试",
+    type: "formal",
+    startTime: "2024-06-16T09:00:00.000Z",
+    endTime: "2024-06-16T11:30:00.000Z",
+    classId: "c4",
+    teacherId: "t2",
+  },
+  {
+    id: "sess_005",
+    name: "其他项目测试",
+    type: "other",
+    startTime: "2024-06-17T15:00:00.000Z",
+    classId: "c3",
+    teacherId: "t3",
+    remark: "坐位体前屈专项测试",
+  },
+];
+
 function generateMockRecords(): TestRecord[] {
   const records: TestRecord[] = [];
   const c1Students = mockStudents.filter((s) => s.classId === "c1");
@@ -263,14 +313,17 @@ function generateMockRecords(): TestRecord[] {
           studentId: student.id,
           projectId: pid,
           teacherId: "t1",
+          sessionId: mockSessions[0].id,
           score,
           points: 60 + Math.round(Math.random() * 40),
           grade: isAbnormal ? "fail" : (["excellent", "good", "pass", "fail"][Math.floor(Math.random() * 4)] as any),
           status: isAbnormal ? "abnormal" : "normal",
           reviewed: Math.random() < 0.6,
           photos: [],
+          syncStatus: "synced",
           createdAt: new Date(Date.now() - Math.random() * 86400000 * 3).toISOString(),
           updatedAt: new Date().toISOString(),
+          syncedAt: new Date().toISOString(),
         });
       }
     });

@@ -11,12 +11,15 @@ import type {
   AttendanceStatus,
   RecordStatus,
   GradeLevel,
+  TestSession,
+  SyncStatus,
 } from "@/types";
 import {
   mockTeachers,
   mockClasses,
   mockStudents,
   mockProjects,
+  mockSessions,
 } from "@/mock";
 import { calculateScore, generateId } from "@/utils";
 import { getThresholds } from "@/utils/scoring";
@@ -29,6 +32,9 @@ interface AppState {
   teachers: Teacher[];
   classes: ClassInfo[];
   projects: TestProject[];
+  sessions: TestSession[];
+  currentSessionId: string | null;
+  isOnline: boolean;
 
   currentClassId: string;
   searchKeyword: string;
@@ -81,10 +87,17 @@ interface AppState {
   setScanModalOpen: (open: boolean) => void;
   setCameraModalOpen: (open: boolean, studentId?: string) => void;
 
+  setCurrentSession: (sessionId: string) => void;
+  createSession: (session: Omit<TestSession, "id">) => void;
+  setIsOnline: (online: boolean) => void;
+  syncPendingRecords: () => void;
+  getRecordsBySession: (sessionId: string) => TestRecord[];
+
   getFilteredStudents: () => Student[];
   getRecordsByClass: (classId: string) => TestRecord[];
   getRecordsByStudent: (studentId: string) => TestRecord[];
   getStudentRecordForProject: (studentId: string, projectId: string) => TestRecord | undefined;
+  locateStudentInEntry: (studentId: string) => boolean;
   recalcGrade: (recordId: string) => void;
 
   resetAll: () => void;
@@ -96,12 +109,16 @@ const STATIC_STATE = {
   classes: mockClasses,
   projects: mockProjects,
   students: mockStudents,
+  sessions: mockSessions,
 };
 
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
       ...STATIC_STATE,
+
+      currentSessionId: mockSessions[0].id,
+      isOnline: true,
 
       currentClassId: mockClasses[0].id,
       searchKeyword: "",
@@ -201,14 +218,17 @@ export const useAppStore = create<AppState>()(
             studentId,
             projectId,
             teacherId: state.currentTeacher.id,
+            sessionId: state.currentSessionId,
             score,
             points,
             grade,
             status: finalStatus,
             reviewed: false,
             photos,
+            syncStatus: state.isOnline ? "synced" : "pending",
             createdAt: now,
             updatedAt: now,
+            syncedAt: state.isOnline ? now : undefined,
             remark,
           };
           set({ records: [...state.records, newRecord] });
@@ -301,6 +321,32 @@ export const useAppStore = create<AppState>()(
       setCameraModalOpen: (open, studentId) =>
         set({ cameraModalOpen: open, currentPhotoStudentId: studentId ?? null }),
 
+      setCurrentSession: (sessionId) =>
+        set({ currentSessionId: sessionId }),
+
+      createSession: (session) =>
+        set((state) => ({
+          sessions: [...state.sessions, { ...session, id: generateId("sess") }],
+        })),
+
+      setIsOnline: (online) => set({ isOnline: online }),
+
+      syncPendingRecords: () => {
+        const state = get();
+        if (!state.isOnline) return;
+        const now = new Date().toISOString();
+        set({
+          records: state.records.map((r) =>
+            r.syncStatus === "pending"
+              ? { ...r, syncStatus: "synced" as SyncStatus, syncedAt: now }
+              : r
+          ),
+        });
+      },
+
+      getRecordsBySession: (sessionId) =>
+        get().records.filter((r) => r.sessionId === sessionId),
+
       getFilteredStudents: () => {
         const state = get();
         let list = state.students.filter((s) => s.classId === state.currentClassId);
@@ -334,6 +380,23 @@ export const useAppStore = create<AppState>()(
         get().records.find(
           (r) => r.studentId === studentId && r.projectId === projectId
         ),
+
+      locateStudentInEntry: (studentId) => {
+        const state = get();
+        const project = state.projects.find((p) => p.id === state.currentProjectId);
+        const filtered = state.students.filter(
+          (s) =>
+            s.classId === state.currentClassId &&
+            s.attendanceStatus === "present" &&
+            (!project || project.gender === "both" || s.gender === project.gender)
+        );
+        const idx = filtered.findIndex((s) => s.id === studentId);
+        if (idx >= 0) {
+          set({ currentEntryStudentIndex: idx });
+          return true;
+        }
+        return false;
+      },
 
       recalcGrade: (recordId) => {
         const state = get();
@@ -376,6 +439,9 @@ export const useAppStore = create<AppState>()(
         students: state.students,
         records: state.records,
         logs: state.logs,
+        sessions: state.sessions,
+        currentSessionId: state.currentSessionId,
+        isOnline: state.isOnline,
         currentClassId: state.currentClassId,
         currentProjectId: state.currentProjectId,
         currentTeacherId: state.currentTeacher.id,

@@ -20,6 +20,8 @@ import {
 import { useAppStore } from "@/store";
 import { Avatar } from "@/components/Avatar";
 import { GradeBadge } from "@/components/GradeBadge";
+import { SessionSelector } from "@/components/SessionSelector";
+import { StudentDetailModal } from "@/components/StudentDetailModal";
 import {
   attendanceLabel,
   attendanceTextColor,
@@ -63,12 +65,14 @@ export default function ReviewPage() {
     updateRecord,
     recalcGrade,
     currentTeacher,
+    currentSessionId,
   } = useAppStore();
 
   const [filter, setFilter] = useState<FilterKey>("unreviewed");
   const [search, setSearch] = useState("");
   const [expandRec, setExpandRec] = useState<string | null>(null);
   const [editingScore, setEditingScore] = useState<{ id: string; value: string } | null>(null);
+  const [detailStudentId, setDetailStudentId] = useState<string | null>(null);
 
   const classStudents = useMemo(
     () => students.filter((s) => s.classId === currentClassId),
@@ -90,6 +94,7 @@ export default function ReviewPage() {
   const classRecords = useMemo(() => {
     const ids = new Set(classStudents.map((s) => s.id));
     let list = records.filter((r) => ids.has(r.studentId));
+    if (currentSessionId) list = list.filter((r) => r.sessionId === currentSessionId);
     if (currentProjectId) list = list.filter((r) => r.projectId === currentProjectId);
     if (filter === "abnormal") list = list.filter((r) => r.status === "abnormal");
     else if (filter === "absent") list = list.filter((r) => r.status === "absent");
@@ -112,7 +117,7 @@ export default function ReviewPage() {
       if (a.status !== b.status) return a.status === "abnormal" ? -1 : 1;
       return b.updatedAt.localeCompare(a.updatedAt);
     });
-  }, [records, classStudents, currentProjectId, filter, search, studentMap]);
+  }, [records, classStudents, currentSessionId, currentProjectId, filter, search, studentMap]);
 
   const logsForRecord = (rid: string) =>
     logs.filter((l) => l.recordId === rid).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -184,6 +189,7 @@ export default function ReviewPage() {
                 </option>
               ))}
             </select>
+            <SessionSelector className="!w-64" />
             <select
               value={currentProjectId || ""}
               onChange={(e) => setCurrentProject(e.target.value || null)}
@@ -418,6 +424,13 @@ export default function ReviewPage() {
                         </td>
                         <td className="px-4 py-3 text-right">
                           <div className="inline-flex items-center gap-1">
+                            <button
+                              onClick={() => setDetailStudentId(r.studentId)}
+                              className="p-1.5 rounded-lg text-slate-600 hover:bg-slate-100 transition"
+                              title="查看详情"
+                            >
+                              <Eye size={16} />
+                            </button>
                             {!r.reviewed && (
                               <button
                                 onClick={() => batchReview([r.id])}
@@ -538,6 +551,12 @@ export default function ReviewPage() {
           </div>
         </div>
       </div>
+
+      <StudentDetailModal
+        open={detailStudentId !== null}
+        studentId={detailStudentId}
+        onClose={() => setDetailStudentId(null)}
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { X, ScanLine, CheckCircle2, Search, AlertCircle } from "lucide-react";
 import jsQR from "jsqr";
 import { useAppStore } from "@/store";
@@ -6,13 +7,24 @@ import { Avatar } from "@/components/Avatar";
 import { genderLabel } from "@/utils";
 
 export function ScanModal() {
-  const { scanModalOpen, setScanModalOpen, students, classes, setCurrentClass, setSearchKeyword, setCurrentProject } =
-    useAppStore();
+  const location = useLocation();
+  const {
+    scanModalOpen,
+    setScanModalOpen,
+    students,
+    classes,
+    setCurrentClass,
+    setSearchKeyword,
+    setCurrentProject,
+    setCurrentEntryStudentIndex,
+    getFilteredStudents,
+  } = useAppStore();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
   const foundRef = useRef(false);
+  const autoCloseTimerRef = useRef<number | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [found, setFound] = useState<ReturnType<typeof findStudentAnyClass> | null>(null);
@@ -38,6 +50,26 @@ export function ScanModal() {
     }
     return s || undefined;
   }
+
+  const isDataEntryPage = location.pathname.includes("/data-entry");
+
+  const handleNavigate = useCallback(
+    (student: NonNullable<typeof found>) => {
+      if (isDataEntryPage) {
+        setCurrentClass(student.classId);
+        setSearchKeyword("");
+        setTimeout(() => {
+          useAppStore.getState().locateStudentInEntry(student.id);
+        }, 50);
+      } else {
+        setCurrentClass(student.classId);
+        setSearchKeyword(student.studentNo);
+        setCurrentProject(null);
+      }
+      setScanModalOpen(false);
+    },
+    [isDataEntryPage, setCurrentClass, setSearchKeyword, setCurrentProject, setScanModalOpen]
+  );
 
   useEffect(() => {
     if (!scanModalOpen) return;
@@ -124,6 +156,19 @@ export function ScanModal() {
     };
   }, [scanModalOpen]);
 
+  useEffect(() => {
+    if (!found || !scanModalOpen) return;
+    autoCloseTimerRef.current = window.setTimeout(() => {
+      handleNavigate(found);
+    }, 700);
+    return () => {
+      if (autoCloseTimerRef.current) {
+        clearTimeout(autoCloseTimerRef.current);
+        autoCloseTimerRef.current = null;
+      }
+    };
+  }, [found, scanModalOpen]);
+
   if (!scanModalOpen) return null;
 
   const handleSearchManual = () => {
@@ -131,14 +176,6 @@ export function ScanModal() {
     const s = findStudentAnyClass(manualInput);
     if (s) setFound(s);
     else setError("未找到匹配的学生，请检查输入");
-  };
-
-  const handleConfirm = () => {
-    if (!found) return;
-    setCurrentClass(found.classId);
-    setSearchKeyword(found.studentNo);
-    setCurrentProject(null);
-    setScanModalOpen(false);
   };
 
   const className = found ? classes.find((c) => c.id === found.classId)?.name : "";
@@ -280,10 +317,14 @@ export function ScanModal() {
                     检测为其他班级学生，将自动切换至 {className}
                   </div>
                 )}
+                <div className="mt-2 text-xs text-success font-medium flex items-center gap-1">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-success" />
+                  </span>
+                  识别成功，即将自动跳转...
+                </div>
               </div>
-              <button onClick={handleConfirm} className="btn-success px-5">
-                确认定位
-              </button>
             </div>
           </div>
         )}

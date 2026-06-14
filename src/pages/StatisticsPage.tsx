@@ -35,6 +35,7 @@ import {
 import { useAppStore } from "@/store";
 import { exportClassReport } from "@/services/export";
 import { Avatar } from "@/components/Avatar";
+import { SessionSelector } from "@/components/SessionSelector";
 import { cn } from "@/lib/utils";
 import { gradeLabel, formatDateShort, formatTime, toFixedIfNeeded } from "@/utils";
 
@@ -51,6 +52,7 @@ export default function StatisticsPage() {
     logs,
     teachers,
     currentTeacher,
+    currentSessionId,
   } = useAppStore();
 
   const currentClass = classes.find((c) => c.id === currentClassId);
@@ -59,10 +61,11 @@ export default function StatisticsPage() {
     [students, currentClassId]
   );
   const classStudentIds = useMemo(() => new Set(classStudents.map((s) => s.id)), [classStudents]);
-  const classRecords = useMemo(
-    () => records.filter((r) => classStudentIds.has(r.studentId) && r.score !== null),
-    [records, classStudentIds]
-  );
+  const classRecords = useMemo(() => {
+    let list = records.filter((r) => classStudentIds.has(r.studentId) && r.score !== null);
+    if (currentSessionId) list = list.filter((r) => r.sessionId === currentSessionId);
+    return list;
+  }, [records, classStudentIds, currentSessionId]);
 
   const { stats, projectStats, gradeDistribution } = useMemo(() => {
     const studentAverages = new Map<string, number>();
@@ -239,6 +242,7 @@ export default function StatisticsPage() {
                 </option>
               ))}
             </select>
+            <SessionSelector className="!w-64" />
             <button onClick={handleExport} className="btn-primary">
               <FileSpreadsheet size={16} />
               导出上报文件
