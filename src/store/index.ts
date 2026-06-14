@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   Teacher,
   ClassInfo,
@@ -16,12 +17,12 @@ import {
   mockClasses,
   mockStudents,
   mockProjects,
-  mockRecords,
-  mockLogs,
 } from "@/mock";
 import { calculateScore, generateId } from "@/utils";
+import { getThresholds } from "@/utils/scoring";
 
 (globalThis as any).__projects = mockProjects;
+void getThresholds;
 
 interface AppState {
   currentTeacher: Teacher;
@@ -61,7 +62,7 @@ interface AppState {
     status: RecordStatus,
     photos?: string[],
     remark?: string
-  ) => void;
+  ) => TestRecord | undefined;
   updateRecord: (recordId: string, data: Partial<TestRecord>) => void;
   batchReview: (recordIds: string[]) => void;
   addPhotoToRecord: (recordId: string, photo: string) => void;
@@ -85,242 +86,309 @@ interface AppState {
   getRecordsByStudent: (studentId: string) => TestRecord[];
   getStudentRecordForProject: (studentId: string, projectId: string) => TestRecord | undefined;
   recalcGrade: (recordId: string) => void;
+
+  resetAll: () => void;
 }
 
-export const useAppStore = create<AppState>((set, get) => ({
+const STATIC_STATE = {
   currentTeacher: mockTeachers[0],
   teachers: mockTeachers,
   classes: mockClasses,
   projects: mockProjects,
-
-  currentClassId: mockClasses[0].id,
-  searchKeyword: "",
-  attendanceFilter: "all",
   students: mockStudents,
+};
 
-  currentProjectId: null,
-  records: mockRecords,
-  logs: mockLogs,
-  selectedStudentIds: [],
-  currentEntryStudentIndex: 0,
+export const useAppStore = create<AppState>()(
+  persist(
+    (set, get) => ({
+      ...STATIC_STATE,
 
-  timer: {
-    isRunning: false,
-    elapsed: 0,
-    laps: [],
-    startTime: null,
-  },
-  scanModalOpen: false,
-  cameraModalOpen: false,
-  currentPhotoStudentId: null,
+      currentClassId: mockClasses[0].id,
+      searchKeyword: "",
+      attendanceFilter: "all",
 
-  setCurrentClass: (classId) => set({ currentClassId: classId, currentEntryStudentIndex: 0, selectedStudentIds: [] }),
-  setSearchKeyword: (kw) => set({ searchKeyword: kw }),
-  setAttendanceFilter: (f) => set({ attendanceFilter: f }),
+      currentProjectId: null,
+      records: [],
+      logs: [],
+      selectedStudentIds: [],
+      currentEntryStudentIndex: 0,
 
-  updateStudentStatus: (studentId, status) =>
-    set((state) => ({
-      students: state.students.map((s) => (s.id === studentId ? { ...s, attendanceStatus: status } : s)),
-    })),
+      timer: {
+        isRunning: false,
+        elapsed: 0,
+        laps: [],
+        startTime: null,
+      },
+      scanModalOpen: false,
+      cameraModalOpen: false,
+      currentPhotoStudentId: null,
 
-  batchUpdateStatus: (studentIds, status) =>
-    set((state) => ({
-      students: state.students.map((s) => (studentIds.includes(s.id) ? { ...s, attendanceStatus: status } : s)),
-    })),
+      setCurrentClass: (classId) =>
+        set({ currentClassId: classId, currentEntryStudentIndex: 0, selectedStudentIds: [] }),
+      setSearchKeyword: (kw) => set({ searchKeyword: kw }),
+      setAttendanceFilter: (f) => set({ attendanceFilter: f }),
 
-  findStudentByQR: (qr) => get().students.find((s) => s.qrCode === qr),
+      updateStudentStatus: (studentId, status) =>
+        set((state) => ({
+          students: state.students.map((s) =>
+            s.id === studentId ? { ...s, attendanceStatus: status } : s
+          ),
+        })),
 
-  setCurrentProject: (projectId) => set({ currentProjectId: projectId, currentEntryStudentIndex: 0 }),
-  setCurrentEntryStudentIndex: (idx) => set({ currentEntryStudentIndex: idx }),
+      batchUpdateStatus: (studentIds, status) =>
+        set((state) => ({
+          students: state.students.map((s) =>
+            studentIds.includes(s.id) ? { ...s, attendanceStatus: status } : s
+          ),
+        })),
 
-  addOrUpdateRecord: (studentId, projectId, score, status, photos = [], remark) => {
-    const state = get();
-    const student = state.students.find((s) => s.id === studentId);
-    if (!student) return;
+      findStudentByQR: (qr) => get().students.find((s) => s.qrCode === qr),
 
-    const existing = state.records.find((r) => r.studentId === studentId && r.projectId === projectId);
-    let points = 0;
-    let grade: GradeLevel | null = null;
-    let isAbnormal = false;
+      setCurrentProject: (projectId) =>
+        set({ currentProjectId: projectId, currentEntryStudentIndex: 0 }),
+      setCurrentEntryStudentIndex: (idx) => set({ currentEntryStudentIndex: idx }),
 
-    if (score !== null) {
-      const res = calculateScore(projectId, student.gender, student.age, score);
-      points = res.points;
-      grade = res.grade;
-      isAbnormal = res.isAbnormal;
-    }
+      addOrUpdateRecord: (studentId, projectId, score, status, photos = [], remark) => {
+        const state = get();
+        const student = state.students.find((s) => s.id === studentId);
+        const project = state.projects.find((p) => p.id === projectId);
+        if (!student) return undefined;
 
-    const now = new Date().toISOString();
-    const finalStatus: RecordStatus = isAbnormal ? "abnormal" : status;
+        const existing = state.records.find(
+          (r) => r.studentId === studentId && r.projectId === projectId
+        );
+        let points = 0;
+        let grade: GradeLevel | null = null;
+        let isAbnormal = false;
 
-    if (existing) {
-      set({
-        records: state.records.map((r) =>
-          r.id === existing.id
-            ? {
-                ...r,
-                score,
-                points,
-                grade,
-                status: finalStatus,
-                photos: photos.length ? [...r.photos, ...photos] : r.photos,
-                remark: remark ?? r.remark,
-                updatedAt: now,
-              }
-            : r
+        if (score !== null) {
+          const res = calculateScore(projectId, student.gender, student.age, score, project);
+          points = res.points;
+          grade = res.grade;
+          isAbnormal = res.isAbnormal;
+        }
+
+        const now = new Date().toISOString();
+        const finalStatus: RecordStatus =
+          status === "normal" && isAbnormal ? "abnormal" : status;
+
+        if (existing) {
+          const updated: TestRecord = {
+            ...existing,
+            score,
+            points,
+            grade,
+            status: finalStatus,
+            photos: photos.length ? [...existing.photos, ...photos] : existing.photos,
+            remark: remark ?? existing.remark,
+            updatedAt: now,
+          };
+          set({
+            records: state.records.map((r) => (r.id === existing.id ? updated : r)),
+          });
+          state.addLog({
+            recordId: existing.id,
+            teacherId: state.currentTeacher.id,
+            teacherName: state.currentTeacher.name,
+            oldScore: existing.score,
+            newScore: score,
+            action: "update",
+          });
+          return updated;
+        } else {
+          const newRecord: TestRecord = {
+            id: generateId("r"),
+            studentId,
+            projectId,
+            teacherId: state.currentTeacher.id,
+            score,
+            points,
+            grade,
+            status: finalStatus,
+            reviewed: false,
+            photos,
+            createdAt: now,
+            updatedAt: now,
+            remark,
+          };
+          set({ records: [...state.records, newRecord] });
+          state.addLog({
+            recordId: newRecord.id,
+            teacherId: state.currentTeacher.id,
+            teacherName: state.currentTeacher.name,
+            oldScore: null,
+            newScore: score,
+            action: "create",
+          });
+          return newRecord;
+        }
+      },
+
+      updateRecord: (recordId, data) =>
+        set((state) => ({
+          records: state.records.map((r) =>
+            r.id === recordId ? { ...r, ...data, updatedAt: new Date().toISOString() } : r
+          ),
+        })),
+
+      batchReview: (recordIds) => {
+        const state = get();
+        set({
+          records: state.records.map((r) =>
+            recordIds.includes(r.id) ? { ...r, reviewed: true } : r
+          ),
+        });
+        recordIds.forEach((rid) => {
+          state.addLog({
+            recordId: rid,
+            teacherId: state.currentTeacher.id,
+            teacherName: state.currentTeacher.name,
+            oldScore: null,
+            newScore: null,
+            action: "review",
+          });
+        });
+      },
+
+      addPhotoToRecord: (recordId, photo) =>
+        set((state) => ({
+          records: state.records.map((r) =>
+            r.id === recordId ? { ...r, photos: [...r.photos, photo] } : r
+          ),
+        })),
+
+      addLog: (log) =>
+        set((state) => ({
+          logs: [
+            { ...log, id: generateId("log"), createdAt: new Date().toISOString() },
+            ...state.logs,
+          ],
+        })),
+
+      toggleStudentSelection: (studentId) =>
+        set((state) => ({
+          selectedStudentIds: state.selectedStudentIds.includes(studentId)
+            ? state.selectedStudentIds.filter((id) => id !== studentId)
+            : [...state.selectedStudentIds, studentId],
+        })),
+
+      clearSelection: () => set({ selectedStudentIds: [] }),
+
+      selectAll: () =>
+        set((state) => ({
+          selectedStudentIds: state.getFilteredStudents().map((s) => s.id),
+        })),
+
+      startTimer: () =>
+        set({ timer: { ...get().timer, isRunning: true, startTime: Date.now() } }),
+
+      stopTimer: () => {
+        const t = get().timer;
+        set({ timer: { ...t, isRunning: false, startTime: null } });
+      },
+
+      setTimerElapsed: (ms) => set({ timer: { ...get().timer, elapsed: ms } }),
+
+      resetTimer: () =>
+        set({
+          timer: { isRunning: false, elapsed: 0, laps: [], startTime: null },
+        }),
+
+      addTimerLap: (ms) =>
+        set({ timer: { ...get().timer, laps: [...get().timer.laps, ms] } }),
+
+      setScanModalOpen: (open) => set({ scanModalOpen: open }),
+      setCameraModalOpen: (open, studentId) =>
+        set({ cameraModalOpen: open, currentPhotoStudentId: studentId ?? null }),
+
+      getFilteredStudents: () => {
+        const state = get();
+        let list = state.students.filter((s) => s.classId === state.currentClassId);
+        if (state.attendanceFilter !== "all") {
+          list = list.filter((s) => s.attendanceStatus === state.attendanceFilter);
+        }
+        if (state.searchKeyword.trim()) {
+          const kw = state.searchKeyword.trim().toLowerCase();
+          list = list.filter(
+            (s) =>
+              s.name.toLowerCase().includes(kw) ||
+              s.studentNo.toLowerCase().includes(kw) ||
+              s.qrCode.toLowerCase().includes(kw)
+          );
+        }
+        return list.sort((a, b) => a.studentNo.localeCompare(b.studentNo));
+      },
+
+      getRecordsByClass: (classId) => {
+        const state = get();
+        const studentIds = state.students
+          .filter((s) => s.classId === classId)
+          .map((s) => s.id);
+        return state.records.filter((r) => studentIds.includes(r.studentId));
+      },
+
+      getRecordsByStudent: (studentId) =>
+        get().records.filter((r) => r.studentId === studentId),
+
+      getStudentRecordForProject: (studentId, projectId) =>
+        get().records.find(
+          (r) => r.studentId === studentId && r.projectId === projectId
         ),
-      });
-      state.addLog({
-        recordId: existing.id,
-        teacherId: state.currentTeacher.id,
-        teacherName: state.currentTeacher.name,
-        oldScore: existing.score,
-        newScore: score,
-        action: "update",
-      });
-    } else {
-      const newRecord: TestRecord = {
-        id: generateId("r"),
-        studentId,
-        projectId,
-        teacherId: state.currentTeacher.id,
-        score,
-        points,
-        grade,
-        status: finalStatus,
-        reviewed: false,
-        photos,
-        createdAt: now,
-        updatedAt: now,
-        remark,
-      };
-      set({ records: [...state.records, newRecord] });
-      state.addLog({
-        recordId: newRecord.id,
-        teacherId: state.currentTeacher.id,
-        teacherName: state.currentTeacher.name,
-        oldScore: null,
-        newScore: score,
-        action: "create",
-      });
-    }
-  },
 
-  updateRecord: (recordId, data) =>
-    set((state) => ({
-      records: state.records.map((r) =>
-        r.id === recordId ? { ...r, ...data, updatedAt: new Date().toISOString() } : r
-      ),
-    })),
+      recalcGrade: (recordId) => {
+        const state = get();
+        const rec = state.records.find((r) => r.id === recordId);
+        if (!rec || rec.score === null) return;
+        const student = state.students.find((s) => s.id === rec.studentId);
+        const project = state.projects.find((p) => p.id === rec.projectId);
+        if (!student) return;
+        const res = calculateScore(
+          rec.projectId,
+          student.gender,
+          student.age,
+          rec.score,
+          project
+        );
+        state.updateRecord(recordId, {
+          points: res.points,
+          grade: res.grade,
+          status: res.isAbnormal ? "abnormal" : rec.status === "abnormal" ? "normal" : rec.status,
+        });
+      },
 
-  batchReview: (recordIds) => {
-    const state = get();
-    set({
-      records: state.records.map((r) => (recordIds.includes(r.id) ? { ...r, reviewed: true } : r)),
-    });
-    recordIds.forEach((rid) => {
-      state.addLog({
-        recordId: rid,
-        teacherId: state.currentTeacher.id,
-        teacherName: state.currentTeacher.name,
-        oldScore: null,
-        newScore: null,
-        action: "review",
-      });
-    });
-  },
-
-  addPhotoToRecord: (recordId, photo) =>
-    set((state) => ({
-      records: state.records.map((r) =>
-        r.id === recordId ? { ...r, photos: [...r.photos, photo] } : r
-      ),
-    })),
-
-  addLog: (log) =>
-    set((state) => ({
-      logs: [
-        { ...log, id: generateId("log"), createdAt: new Date().toISOString() },
-        ...state.logs,
-      ],
-    })),
-
-  toggleStudentSelection: (studentId) =>
-    set((state) => ({
-      selectedStudentIds: state.selectedStudentIds.includes(studentId)
-        ? state.selectedStudentIds.filter((id) => id !== studentId)
-        : [...state.selectedStudentIds, studentId],
-    })),
-
-  clearSelection: () => set({ selectedStudentIds: [] }),
-
-  selectAll: () =>
-    set((state) => ({
-      selectedStudentIds: state.getFilteredStudents().map((s) => s.id),
-    })),
-
-  startTimer: () =>
-    set({ timer: { ...get().timer, isRunning: true, startTime: Date.now() } }),
-
-  stopTimer: () => {
-    const t = get().timer;
-    set({ timer: { ...t, isRunning: false, startTime: null } });
-  },
-
-  setTimerElapsed: (ms) => set({ timer: { ...get().timer, elapsed: ms } }),
-
-  resetTimer: () =>
-    set({
-      timer: { isRunning: false, elapsed: 0, laps: [], startTime: null },
+      resetAll: () => {
+        set({
+          records: [],
+          logs: [],
+          selectedStudentIds: [],
+          currentEntryStudentIndex: 0,
+          timer: { isRunning: false, elapsed: 0, laps: [], startTime: null },
+          students: STATIC_STATE.students,
+          searchKeyword: "",
+          attendanceFilter: "all",
+        });
+      },
     }),
-
-  addTimerLap: (ms) =>
-    set({ timer: { ...get().timer, laps: [...get().timer.laps, ms] } }),
-
-  setScanModalOpen: (open) => set({ scanModalOpen: open }),
-  setCameraModalOpen: (open, studentId) =>
-    set({ cameraModalOpen: open, currentPhotoStudentId: studentId ?? null }),
-
-  getFilteredStudents: () => {
-    const state = get();
-    let list = state.students.filter((s) => s.classId === state.currentClassId);
-    if (state.attendanceFilter !== "all") {
-      list = list.filter((s) => s.attendanceStatus === state.attendanceFilter);
+    {
+      name: "sports-pe-storage-v1",
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        students: state.students,
+        records: state.records,
+        logs: state.logs,
+        currentClassId: state.currentClassId,
+        currentProjectId: state.currentProjectId,
+        currentTeacherId: state.currentTeacher.id,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const persisted: any = state;
+        if (persisted.currentTeacherId) {
+          const t = STATIC_STATE.teachers.find((x) => x.id === persisted.currentTeacherId);
+          if (t) (state as any).currentTeacher = t;
+        }
+      },
+      version: 1,
     }
-    if (state.searchKeyword.trim()) {
-      const kw = state.searchKeyword.trim().toLowerCase();
-      list = list.filter(
-        (s) =>
-          s.name.toLowerCase().includes(kw) ||
-          s.studentNo.toLowerCase().includes(kw) ||
-          s.qrCode.toLowerCase().includes(kw)
-      );
-    }
-    return list.sort((a, b) => a.studentNo.localeCompare(b.studentNo));
-  },
-
-  getRecordsByClass: (classId) => {
-    const state = get();
-    const studentIds = state.students.filter((s) => s.classId === classId).map((s) => s.id);
-    return state.records.filter((r) => studentIds.includes(r.studentId));
-  },
-
-  getRecordsByStudent: (studentId) => get().records.filter((r) => r.studentId === studentId),
-
-  getStudentRecordForProject: (studentId, projectId) =>
-    get().records.find((r) => r.studentId === studentId && r.projectId === projectId),
-
-  recalcGrade: (recordId) => {
-    const state = get();
-    const rec = state.records.find((r) => r.id === recordId);
-    if (!rec || rec.score === null) return;
-    const student = state.students.find((s) => s.id === rec.studentId);
-    if (!student) return;
-    const res = calculateScore(rec.projectId, student.gender, student.age, rec.score);
-    state.updateRecord(recordId, {
-      points: res.points,
-      grade: res.grade,
-      status: res.isAbnormal ? "abnormal" : "normal",
-    });
-  },
-}));
+  )
+);

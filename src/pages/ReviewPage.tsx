@@ -14,6 +14,8 @@ import {
   ChevronUp,
   ArrowUpDown,
   Camera,
+  FileSpreadsheet,
+  File,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import { Avatar } from "@/components/Avatar";
@@ -29,6 +31,7 @@ import {
 } from "@/utils";
 import { cn } from "@/lib/utils";
 import type { RecordStatus } from "@/types";
+import { exportClassReport, exportStudentReportExcel, exportStudentReportPDF } from "@/services/export";
 
 type FilterKey = "all" | "abnormal" | "absent" | "delayed" | "fail" | "unreviewed";
 
@@ -193,9 +196,16 @@ export default function ReviewPage() {
                 </option>
               ))}
             </select>
-            <button className="btn-secondary">
+            <button
+              className="btn-secondary"
+              onClick={() => {
+                if (currentClass) {
+                  exportClassReport(currentClass, classStudents, projects, records);
+                }
+              }}
+            >
               <Download size={16} />
-              导出成绩单
+              导出班级成绩单
             </button>
           </div>
         </div>
@@ -427,6 +437,28 @@ export default function ReviewPage() {
                               title="编辑成绩"
                             >
                               <FileText size={16} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (currentClass) {
+                                  exportStudentReportExcel(s, currentClass, projects, records);
+                                }
+                              }}
+                              className="p-1.5 rounded-lg text-primary-600 hover:bg-primary-50 transition"
+                              title="导出个人成绩单（Excel）"
+                            >
+                              <FileSpreadsheet size={16} />
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (currentClass) {
+                                  exportStudentReportPDF(s, currentClass, projects, records);
+                                }
+                              }}
+                              className="p-1.5 rounded-lg text-accent-600 hover:bg-accent-50 transition"
+                              title="导出个人成绩单（PDF）"
+                            >
+                              <File size={16} />
                             </button>
                             <button
                               onClick={() => setExpandRec(expanded ? null : r.id)}

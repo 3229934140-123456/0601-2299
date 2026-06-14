@@ -1,13 +1,14 @@
-import type { GradeLevel, Gender, TestProject, StandardItem } from "@/types";
-import { mockStandards } from "@/mock";
+import type { GradeLevel, Gender, TestProject } from "@/types";
+
+export * from "@/utils/scoring";
 
 export function formatTime(seconds: number): string {
   if (seconds >= 60) {
     const m = Math.floor(seconds / 60);
     const s = (seconds % 60).toFixed(2);
-    return `${m}:${s.padStart(5, "0")}`;
+    return `${m}'${s.padStart(5, "0")}"`;
   }
-  return seconds.toFixed(2);
+  return seconds.toFixed(2) + '"';
 }
 
 export function formatTimerDisplay(ms: number): string {
@@ -88,56 +89,11 @@ export function initials(name: string): string {
   return name.slice(0, 1);
 }
 
-export function calculateScore(
-  projectId: string,
-  gender: Gender,
-  _age: number,
-  score: number
-): { points: number; grade: GradeLevel; isAbnormal: boolean } {
-  const standards = mockStandards.filter((s) => s.projectId === projectId && s.gender === gender);
-  const project: TestProject | undefined = (globalThis as any).__projects?.find((p: any) => p.id === projectId);
-
-  let isAbnormal = false;
-  if (project) {
-    isAbnormal = score < project.minValid || score > project.maxValid;
-  }
-
-  if (standards.length === 0) {
-    const pts = Math.min(100, Math.max(0, Math.round(50 + Math.random() * 50)));
-    let g: GradeLevel = "pass";
-    if (pts >= 90) g = "excellent";
-    else if (pts >= 80) g = "good";
-    else if (pts >= 60) g = "pass";
-    else g = "fail";
-    return { points: pts, grade: g, isAbnormal };
-  }
-
-  const isHigherBetter = score > 0 && standards[0].grade === "excellent" && standards[0].minScore > standards[0].maxScore === false;
-  const sorted = [...standards].sort((a, b) => b.points - a.points);
-  const item = sorted.find((s) => {
-    if (isHigherBetter) {
-      return score >= s.minScore;
-    } else {
-      return score <= s.maxScore;
-    }
-  });
-
-  return {
-    points: item ? item.points : 55,
-    grade: item ? item.grade : "fail",
-    isAbnormal,
-  };
-}
-
 export function toFixedIfNeeded(v: number, digits = 2): string {
   if (Number.isInteger(v)) return String(v);
-  return v.toFixed(digits);
+  return v.toFixed(digits).replace(/\.?0+$/, "");
 }
 
 export function generateId(prefix = "id"): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-export function getStandardsByProject(projectId: string, gender: Gender): StandardItem[] {
-  return mockStandards.filter((s) => s.projectId === projectId && s.gender === gender);
 }
